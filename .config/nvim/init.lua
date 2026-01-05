@@ -418,7 +418,7 @@ require('lazy').setup({
       require('mason-tool-installer').setup { ensure_installed = ensure_installed }
 
       require('mason-lspconfig').setup {
-        ensure_installed = {}, -- explicitly set to an empty table (Kickstart populates installs via mason-tool-installer)
+        ensure_installed = {}, -- explicitly set to an empty table
         automatic_installation = false,
         handlers = {
           function(server_name)
@@ -580,11 +580,8 @@ require('lazy').setup({
     },
   },
 
-  require 'kickstart.plugins.lint',
-  require 'kickstart.plugins.neo-tree',
-  require 'kickstart.plugins.gitsigns',
 
-  { import = 'custom.plugins' },
+  { import = 'plugins' }
 }, {
   ui = {
     icons = vim.g.have_nerd_font and {} or {
