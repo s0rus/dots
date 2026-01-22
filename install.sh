@@ -41,45 +41,76 @@ fi
 
 echo "Backing up existing dotfiles that would conflict..."
 BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
-mkdir -p "$BACKUP_DIR"
 
 cd ~/dots
 
-# Use stow --simulate to detect conflicts without making changes
-conflicts=$(stow --simulate --no-folding . 2>&1 | grep "existing target is" | awk '{print $NF}' || true)
+# Find all files in the dots repo (these are what stow will try to link)
+find . -type f -o -type l | while read -r repo_file; do
+    # Remove leading './'
+    relative_path="${repo_file#./}"
+    target_path="$HOME/$relative_path"
 
-if [ -n "$conflicts" ]; then
-    echo "Found conflicts, backing up to: $BACKUP_DIR"
-    echo "$conflicts" | while read -r conflict; do
-        # Remove leading "~/" or convert to absolute path
-        conflict_path="${conflict/#\~/$HOME}"
-        
-        if [ -e "$conflict_path" ] && [ ! -L "$conflict_path" ]; then
-            # Create parent directory structure in backup
-            parent_dir="$BACKUP_DIR/$(dirname "${conflict_path#$HOME/}")"
-            mkdir -p "$parent_dir"
-            
-            # Copy the actual file (not symlink)
-            cp -P "$conflict_path" "$BACKUP_DIR/${conflict_path#$HOME/}"
-            echo "  Backed up: ${conflict_path#$HOME/}"
-            
-            # Remove the conflicting file
-            rm -f "$conflict_path"
+    # If something exists at target and it's NOT already a symlink to our repo
+    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
+        # Check if it's already the correct symlink
+        if [ -L "$target_path" ]; then
+            link_target=$(readlink "$target_path")
+            # If it points to our dots repo, skip it
+            if [[ "$link_target" == "$HOME/dots/$relative_path" ]] || [[ "$link_target" == ~/dots/"$relative_path" ]]; then
+                continue
+            fi
         fi
-    done
+
+        # This is a conflict - back it up
+        if [ ! -d "$BACKUP_DIR" ]; then
+            mkdir -p "$BACKUP_DIR"
+            echo "Created backup directory: $BACKUP_DIR"
+        fi
+
+        parent_dir="$BACKUP_DIR/$(dirname "$relative_path")"
+        mkdir -p "$parent_dir"
+
+        # Move (not copy) to preserve permissions and avoid issues
+        mv "$target_path" "$BACKUP_DIR/$relative_path"
+        echo "  Backed up: $relative_path"
+    fi
+done
+
+# Also handle directories that might conflict (less common but possible)
+find . -type d -mindepth 1 | while read -r repo_dir; do
+    relative_path="${repo_dir#./}"
+    target_path="$HOME/$relative_path"
+
+    # If it exists and is a regular file (not a directory), that's a conflict
+    if [ -f "$target_path" ]; then
+        if [ ! -d "$BACKUP_DIR" ]; then
+            mkdir -p "$BACKUP_DIR"
+        fi
+
+        parent_dir="$BACKUP_DIR/$(dirname "$relative_path")"
+        mkdir -p "$parent_dir"
+
+        mv "$target_path" "$BACKUP_DIR/$relative_path"
+        echo "  Backed up conflicting file: $relative_path"
+    fi
+done
+
+if [ -d "$BACKUP_DIR" ]; then
+    echo "Backed up existing files to: $BACKUP_DIR"
 else
-    echo "No conflicts found."
-    rmdir "$BACKUP_DIR" 2>/dev/null || true
+    echo "No conflicts found, no backup needed."
 fi
 
 echo "Setting up symlinks with stow..."
-if stow --no-folding .; then
+if stow --restow --verbose=2 .; then
     echo "Symlinks created successfully."
 else
-    echo "Error: Stow failed. Restoring from backup..."
+    echo "Error: Stow failed."
     if [ -d "$BACKUP_DIR" ]; then
-        cp -r "$BACKUP_DIR"/* "$HOME/"
-        echo "Backup restored. Please check conflicts manually."
+        echo "Your original files are safe in: $BACKUP_DIR"
+        echo "Restoring backup..."
+        cp -r "$BACKUP_DIR"/. "$HOME/"
+        echo "Backup restored."
     fi
     exit 1
 fi
@@ -90,6 +121,7 @@ if tmux info &>/dev/null; then
     tmux source-file ~/.config/tmux/tmux.conf
 fi
 
-echo "Setup complete!"
-echo "Backup location (if created): $BACKUP_DIR"
-echo "Reload your tmux and install plugins with prefix + I."
+echo ""
+echo "✓ Setup complete!"
+[ -d "$BACKUP_DIR" ] && echo "✓ Your old configs backed up to: $BACKUP_DIR"
+echo "✓ Reload tmux and install plugins with prefix + I"
