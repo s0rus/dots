@@ -2,7 +2,7 @@
 
 set -e
 
-echo "Starting dotfiles setup..."
+echo "➡  Starting dotfiles setup..."
 
 # 1. Detect OS
 OS="unknown"
@@ -32,27 +32,27 @@ install_package() {
 }
 
 # 2. Install dependencies
-echo "Installing dependencies..."
+echo "➡  Installing dependencies..."
 install_package stow
 install_package tmux
 install_package neovim
 
 # 3. Handle Tmux Plugin Manager
 if [ ! -d ~/.tmux/plugins/tpm ]; then
-    echo "Installing TPM..."
+    echo "➡  Installing TPM..."
     git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
 fi
 
 # 4. Handle Dotfiles Repo
 DOTS_DIR="$HOME/dots"
 if [ ! -d "$DOTS_DIR" ]; then
-    echo "Cloning repo..."
+    echo "➡  Cloning repo..."
     git clone https://github.com/s0rus/dots.git "$DOTS_DIR"
 fi
 cd "$DOTS_DIR"
 
 # 5. BACKUP
-echo "Detecting conflicts surgically..."
+echo "➡  Detecting conflicts..."
 BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
 
 mapfile -t items < <(find . -maxdepth 1 -mindepth 1 ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -printf "%P\n")
@@ -90,12 +90,11 @@ stow -v .
 
 # 7. Apply Tmux config
 if tmux info &>/dev/null 2>&1; then
-    echo "Reloading tmux..."
+    echo "➡  Reloading tmux..."
     tmux source-file ~/.config/tmux/tmux.conf 2>/dev/null || true
 fi
 
 echo "========================"
 echo "✓ Setup complete!"
 [ -d "$BACKUP_DIR" ] && echo "✓ Backups: $BACKUP_DIR"
-echo "✓ Hyprland was NOT touched."
 echo "========================"
