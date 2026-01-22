@@ -40,9 +40,10 @@ fi
 
 echo "Backing up any existing dotfiles that would conflict..."
 cd ~/dots
-find . -type f -o -type d | while read -r repo_item; do
-    target_item="${repo_item#./}"  # Remove leading ./
+find . -mindepth 1 -type f -o -mindepth 1 -type d | while read -r repo_item; do
+    target_item="${repo_item#./}"  
     target_path="$HOME/$target_item"
+    if [ "$target_path" = "$HOME" ]; then continue; fi  
     if [ -e "$target_path" ]; then
         backup_path="$target_path.bak"
         echo "Backing up $target_path to $backup_path"
