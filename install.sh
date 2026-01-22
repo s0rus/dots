@@ -82,7 +82,7 @@ echo "Detecting conflicts..."
 BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
 declare -a conflicts_to_remove=()
 
-# Find all files/dirs that would conflict
+# Using maxdepth 1 to avoid backing up subdirectories multiple times
 while IFS= read -r -d '' item; do
     relative_path="${item#./}"
     target_path="$HOME/$relative_path"
@@ -105,10 +105,10 @@ while IFS= read -r -d '' item; do
             echo "Created backup directory: $BACKUP_DIR"
         fi
         
-        parent_dir="$BACKUP_DIR/$(dirname "$relative_path")"
+        # Ensure parent exists in backup
+        parent_dir=$(dirname "$BACKUP_DIR/$relative_path")
         mkdir -p "$parent_dir"
         
-        # Use cp to preserve originals during backup phase
         if [ -d "$target_path" ]; then
             cp -r "$target_path" "$BACKUP_DIR/$relative_path"
             echo "  Backed up directory: $relative_path"
@@ -117,7 +117,7 @@ while IFS= read -r -d '' item; do
             echo "  Backed up file: $relative_path"
         fi
     fi
-done < <(find . -mindepth 1 \( -type f -o -type d \) ! -path "./.git/*" ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -print0)
+done < <(find . -maxdepth 1 -mindepth 1 ! -path "./.git/*" ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -print0)
 
 # Now that everything is safely backed up, remove conflicts
 if [ ${#conflicts_to_remove[@]} -gt 0 ]; then
@@ -175,8 +175,7 @@ done
 if [ "$all_good" = false ]; then
     echo ""
     echo "⚠ Warning: Some expected files are missing"
-    echo "Check your dots repo structure:"
-    echo "  cd ~/dots && find . -type f | head -20"
+    echo "Check your dots repo structure."
 fi
 
 # Apply tmux config if tmux is running
