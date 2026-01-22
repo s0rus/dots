@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 echo "Starting dotfiles setup..."
 
@@ -39,17 +38,18 @@ else
     echo "Dotfiles repo already cloned."
 fi
 
-# Backup existing conflicting directories/files
-echo "Backing up any existing dotfiles to avoid conflicts..."
+echo "Backing up any existing dotfiles that would conflict..."
 cd ~/dots
-for item in .*; do
-    if [ -e ~/"$item" ] && [ "$item" != "." ] && [ "$item" != ".." ]; then
-        echo "Backing up ~/$item to ~/$item.bak"
-        mv ~/"$item" ~/"$item".bak || { echo "Backup failed for $item. Please resolve manually."; exit 1; }
+find . -type f -o -type d | while read -r repo_item; do
+    target_item="${repo_item#./}"  # Remove leading ./
+    target_path="$HOME/$target_item"
+    if [ -e "$target_path" ]; then
+        backup_path="$target_path.bak"
+        echo "Backing up $target_path to $backup_path"
+        mv "$target_path" "$backup_path" || { echo "Backup failed for $target_path. Please resolve manually."; exit 1; }
     fi
 done
 
-# Run stow
 echo "Setting up symlinks with stow..."
 if stow .; then
     echo "Symlinks created successfully."
@@ -60,5 +60,5 @@ fi
 
 # Apply tmux config if possible
 echo "Applying tmux config..."
-tmux source-file ~/.config/tmux/tmux.conf || true
-echo "Setup complete! Backups are in ~/*.bak if needed. If in a tmux session, press prefix + I to install plugins."
+tmux source ~/.config/tmux/tmux.conf || true
+echo "Setup complete. Reload your tmux and install plugins with prefix + I."
