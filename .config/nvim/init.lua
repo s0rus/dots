@@ -567,7 +567,6 @@ require('lazy').setup({
   {
     'nvim-treesitter/nvim-treesitter',
     build = ':TSUpdate',
-    main = 'nvim-treesitter.configs',
     -- [[ Configure Treesitter ]] See `:help nvim-treesitter`
     opts = {
       ensure_installed = { 'bash', 'c', 'diff', 'html', 'lua', 'luadoc', 'markdown', 'markdown_inline', 'query', 'vim', 'vimdoc', 'c_sharp', 'gdscript', 'yaml', 'toml', 'go', 'javascript', 'typescript', 'css', 'html', 'json' },
@@ -579,7 +578,6 @@ require('lazy').setup({
       indent = { enable = true, disable = { 'ruby' } },
     },
   },
-
 
   { import = 'plugins' }
 }, {
