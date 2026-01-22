@@ -16,10 +16,12 @@ fi
 
 install_package() {
     local package="$1"
+    
     if [ "$OS" = "macos" ]; then
         if ! command -v brew >/dev/null 2>&1; then
             echo "Homebrew not found. Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            
             # Add Homebrew to PATH for Apple Silicon Macs
             if [[ $(uname -m) == "arm64" ]]; then
                 echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
@@ -65,143 +67,129 @@ else
     echo "Dotfiles repo already cloned."
 fi
 
-echo "Backing up existing config directories that would conflict..."
-BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
-
 cd ~/dots
 
-# Identify top-level config directories that will be stowed
-declare -a config_dirs
+# Verify the dots repo has content
+echo "Verifying dots repo contents..."
+if [ ! -d .config ] && [ ! -f .bashrc ] && [ ! -f .zshrc ]; then
+    echo "Warning: dots repo seems empty or misconfigured"
+    echo "Contents of ~/dots:"
+    ls -la
+    exit 1
+fi
 
-# Find immediate subdirectories under top-level directories
-while IFS= read -r -d '' top_dir; do
-    top_dir_name=$(basename "$top_dir")
-    # Skip .git directory
-    [[ "$top_dir_name" == ".git" ]] && continue
-    # For .config, .local, etc., find their immediate subdirectories
-    if [ -d "$top_dir" ]; then
-        while IFS= read -r -d '' sub_dir; do
-            relative_path="${sub_dir#./}"
-            config_dirs+=("$relative_path")
-        done < <(find "$top_dir" -mindepth 1 -maxdepth 1 -type d -print0)
-    fi
-done < <(find . -mindepth 1 -maxdepth 1 -type d -print0)
+echo "Detecting conflicts..."
+BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
+declare -a conflicts_to_remove=()
 
-# Backup conflicting config directories
-for config_dir in "${config_dirs[@]}"; do
-    target_path="$HOME/$config_dir"
-    # If directory exists and is not a symlink to our dots
-    if [ -e "$target_path" ] && [ ! -L "$target_path" ]; then
-        # Check if it would actually conflict with our stow
-        has_conflict=false
-        # Check if any files in our repo would conflict
-        if [ -d "$config_dir" ]; then
-            while IFS= read -r -d '' repo_file; do
-                repo_relative="${repo_file#./}"
-                target_file="$HOME/$repo_relative"
-                if [ -e "$target_file" ] && [ ! -L "$target_file" ]; then
-                    has_conflict=true
-                    break
-                elif [ -L "$target_file" ]; then
-                    # Check if symlink points elsewhere
-                    link_target=$(readlink "$target_file")
-                    if [[ "$link_target" != *"/dots/$repo_relative" ]]; then
-                        has_conflict=true
-                        break
-                    fi
-                fi
-            done < <(find "$config_dir" -type f -print0)
-        fi
-        if [ "$has_conflict" = true ]; then
-            if [ ! -d "$BACKUP_DIR" ]; then
-                mkdir -p "$BACKUP_DIR"
-                echo "Created backup directory: $BACKUP_DIR"
-            fi
-            parent_dir="$BACKUP_DIR/$(dirname "$config_dir")"
-            mkdir -p "$parent_dir"
-            # Backup the entire config directory
-            cp -r "$target_path" "$BACKUP_DIR/$config_dir"
-            echo "  Backed up directory: $config_dir"
-            # Remove the directory so stow can work
-            rm -rf "$target_path"
-        fi
-    fi
-done
-
-# Also handle individual files that might conflict
-while IFS= read -r -d '' repo_file; do
-    relative_path="${repo_file#./}"
+# Find all files/dirs that would conflict
+while IFS= read -r -d '' item; do
+    relative_path="${item#./}"
     target_path="$HOME/$relative_path"
-    # Skip if parent directory was already backed up
-    parent_backed_up=false
-    for backed_dir in "${config_dirs[@]}"; do
-        if [[ "$relative_path" == "$backed_dir"* ]]; then
-            if [ -d "$BACKUP_DIR/$backed_dir" ]; then
-                parent_backed_up=true
-                break
-            fi
+    
+    # Skip if already a correct symlink
+    if [ -L "$target_path" ]; then
+        link_target=$(readlink "$target_path")
+        if [[ "$link_target" == "$HOME/dots/$relative_path" ]] || [[ "$link_target" == ~/dots/"$relative_path" ]]; then
+            continue
         fi
-    done
-    if [ "$parent_backed_up" = true ]; then
-        continue
     fi
-    # If file exists and is NOT already a correct symlink
-    if [ -e "$target_path" ] || [ -L "$target_path" ]; then
-        if [ -L "$target_path" ]; then
-            link_target=$(readlink "$target_path")
-            # Skip if already pointing to our dots
-            if [[ "$link_target" == *"/dots/$relative_path" ]]; then
-                continue
-            fi
-        fi
-        # This is a conflict - back it up
+    
+    # If it exists and isn't the correct symlink, it's a conflict
+    if [ -e "$target_path" ]; then
+        conflicts_to_remove+=("$target_path")
+        
+        # Backup
         if [ ! -d "$BACKUP_DIR" ]; then
             mkdir -p "$BACKUP_DIR"
             echo "Created backup directory: $BACKUP_DIR"
         fi
+        
         parent_dir="$BACKUP_DIR/$(dirname "$relative_path")"
         mkdir -p "$parent_dir"
-        cp -P "$target_path" "$BACKUP_DIR/$relative_path"
-        echo "  Backed up file: $relative_path"
-        # Remove so stow can work
-        rm -f "$target_path"
+        
+        # Use cp to preserve originals during backup phase
+        if [ -d "$target_path" ]; then
+            cp -r "$target_path" "$BACKUP_DIR/$relative_path"
+            echo "  Backed up directory: $relative_path"
+        else
+            cp -P "$target_path" "$BACKUP_DIR/$relative_path"
+            echo "  Backed up file: $relative_path"
+        fi
     fi
-done < <(find . -type f -print0)
+done < <(find . -mindepth 1 \( -type f -o -type d \) ! -path "./.git/*" ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -print0)
 
-if [ -d "$BACKUP_DIR" ]; then
-    echo "Backed up existing configs to: $BACKUP_DIR"
-else
-    echo "No conflicts found, no backup needed."
+# Now that everything is safely backed up, remove conflicts
+if [ ${#conflicts_to_remove[@]} -gt 0 ]; then
+    echo ""
+    echo "Removing conflicts to make way for symlinks..."
+    for conflict in "${conflicts_to_remove[@]}"; do
+        echo "  Removing: ${conflict#$HOME/}"
+        rm -rf "$conflict"
+    done
 fi
 
+if [ -d "$BACKUP_DIR" ]; then
+    echo ""
+    echo "✓ All conflicts backed up to: $BACKUP_DIR"
+fi
+
+echo ""
 echo "Setting up symlinks with stow..."
-# Use --ignore to skip install.sh and other non-config files
-if stow --restow --ignore="install.sh" --ignore="README.md" --ignore=".git" --ignore="LICENSE" --verbose=2 .; then
-    echo "Symlinks created successfully."
+if stow --restow --ignore="install.sh" --ignore="README.md" --ignore=".git" --ignore="LICENSE" --verbose=2 . 2>&1 | tee /tmp/stow_output.log; then
+    echo "✓ Symlinks created successfully"
 else
-    echo "Error: Stow failed."
+    echo "✗ Error: Stow failed!"
+    echo ""
+    echo "Stow output:"
+    cat /tmp/stow_output.log
+    echo ""
+    
     if [ -d "$BACKUP_DIR" ]; then
-        echo "Your original files are backed up in: $BACKUP_DIR"
-        echo "You can manually restore them if needed."
+        echo "RESTORING from backup: $BACKUP_DIR"
+        cp -r "$BACKUP_DIR"/. "$HOME/"
+        echo "✓ Backup restored"
     fi
     exit 1
 fi
 
+# Verify critical files were linked
+echo ""
+echo "Verifying symlinks..."
+critical_files=(".config/tmux/tmux.conf" ".config/nvim")
+all_good=true
+
+for file in "${critical_files[@]}"; do
+    if [ -e "$HOME/$file" ]; then
+        if [ -L "$HOME/$file" ]; then
+            echo "  ✓ ~/$file -> $(readlink "$HOME/$file")"
+        else
+            echo "  ⚠ ~/$file exists but is not a symlink"
+        fi
+    else
+        echo "  ✗ ~/$file missing!"
+        all_good=false
+    fi
+done
+
+if [ "$all_good" = false ]; then
+    echo ""
+    echo "⚠ Warning: Some expected files are missing"
+    echo "Check your dots repo structure:"
+    echo "  cd ~/dots && find . -type f | head -20"
+fi
+
 # Apply tmux config if tmux is running
 if tmux info &>/dev/null 2>&1; then
+    echo ""
     echo "Applying tmux config to running session..."
     tmux source-file ~/.config/tmux/tmux.conf 2>/dev/null || true
 fi
 
 echo ""
+echo "========================"
 echo "✓ Setup complete!"
-[ -d "$BACKUP_DIR" ] && echo "✓ Your old configs backed up to: $BACKUP_DIR"
-echo "✓ Neovim installed and configured"
-echo "✓ Reload tmux and install plugins with prefix + I"
-
-if [ "$OS" = "macos" ]; then
-    echo ""
-    echo "macOS specific notes:"
-    echo "  - Homebrew installed/updated"
-    echo "  - You may need to restart your terminal"
-fi
+[ -d "$BACKUP_DIR" ] && echo "✓ Backups: $BACKUP_DIR"
+echo "✓ Neovim installed"
+echo "✓ Reload tmux: prefix + I to install plugins"
+echo "========================"
