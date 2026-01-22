@@ -1,9 +1,10 @@
 #!/bin/bash
+
 set -e
 
 echo "Starting dotfiles setup..."
 
-# Detect OS
+# 1. Detect OS
 OS="unknown"
 if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     OS="linux"
@@ -16,179 +17,85 @@ fi
 
 install_package() {
     local package="$1"
-    
     if [ "$OS" = "macos" ]; then
         if ! command -v brew >/dev/null 2>&1; then
-            echo "Homebrew not found. Installing Homebrew..."
             /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-            
-            # Add Homebrew to PATH for Apple Silicon Macs
-            if [[ $(uname -m) == "arm64" ]]; then
-                echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
-                eval "$(/opt/homebrew/bin/brew shellenv)"
-            fi
+            [[ $(uname -m) == "arm64" ]] && eval "$(/opt/homebrew/bin/brew shellenv)"
         fi
         brew install "$package"
     elif [ "$OS" = "linux" ]; then
-        if command -v pacman >/dev/null 2>&1; then
-            sudo pacman -S --noconfirm "$package"
-        elif command -v apt >/dev/null 2>&1; then
-            sudo apt update && sudo apt install -y "$package"
-        elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y "$package"
-        elif command -v zypper >/dev/null 2>&1; then
-            sudo zypper install -y "$package"
-        else
-            echo "Unsupported package manager. Please install $package manually."
-            exit 1
-        fi
+        if command -v pacman >/dev/null 2>&1; then sudo pacman -S --noconfirm "$package"
+        elif command -v apt >/dev/null 2>&1; then sudo apt update && sudo apt install -y "$package"
+        elif command -v dnf >/dev/null 2>&1; then sudo dnf install -y "$package"
+        else echo "Install $package manually."; exit 1; fi
     fi
 }
 
-# Install dependencies
+# 2. Install dependencies
 echo "Installing dependencies..."
 install_package stow
 install_package tmux
 install_package neovim
 
-# Install Tmux Plugin Manager if missing
+# 3. Handle Tmux Plugin Manager
 if [ ! -d ~/.tmux/plugins/tpm ]; then
-    echo "Installing Tmux Plugin Manager..."
+    echo "Installing TPM..."
     git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm
-else
-    echo "Tmux Plugin Manager already installed."
 fi
 
-# Clone repo if not present
-if [ ! -d ~/dots ]; then
-    echo "Cloning dotfiles repo..."
-    git clone https://github.com/s0rus/dots.git ~/dots
-else
-    echo "Dotfiles repo already cloned."
+# 4. Handle Dotfiles Repo
+DOTS_DIR="$HOME/dots"
+if [ ! -d "$DOTS_DIR" ]; then
+    echo "Cloning repo..."
+    git clone https://github.com/s0rus/dots.git "$DOTS_DIR"
 fi
+cd "$DOTS_DIR"
 
-cd ~/dots
-
-# Verify the dots repo has content
-echo "Verifying dots repo contents..."
-if [ ! -d .config ] && [ ! -f .bashrc ] && [ ! -f .zshrc ]; then
-    echo "Warning: dots repo seems empty or misconfigured"
-    echo "Contents of ~/dots:"
-    ls -la
-    exit 1
-fi
-
-echo "Detecting conflicts..."
+# 5. BACKUP
+echo "Detecting conflicts surgically..."
 BACKUP_DIR="$HOME/dotfiles_backup_$(date +%Y%m%d_%H%M%S)"
-declare -a conflicts_to_remove=()
 
-# Using maxdepth 1 to avoid backing up subdirectories multiple times
-while IFS= read -r -d '' item; do
-    relative_path="${item#./}"
-    target_path="$HOME/$relative_path"
-    
-    # Skip if already a correct symlink
-    if [ -L "$target_path" ]; then
-        link_target=$(readlink "$target_path")
-        if [[ "$link_target" == "$HOME/dots/$relative_path" ]] || [[ "$link_target" == ~/dots/"$relative_path" ]]; then
-            continue
-        fi
-    fi
-    
-    # If it exists and isn't the correct symlink, it's a conflict
-    if [ -e "$target_path" ]; then
-        conflicts_to_remove+=("$target_path")
-        
-        # Backup
-        if [ ! -d "$BACKUP_DIR" ]; then
-            mkdir -p "$BACKUP_DIR"
-            echo "Created backup directory: $BACKUP_DIR"
-        fi
-        
-        # Ensure parent exists in backup
-        parent_dir=$(dirname "$BACKUP_DIR/$relative_path")
-        mkdir -p "$parent_dir"
-        
-        if [ -d "$target_path" ]; then
-            cp -r "$target_path" "$BACKUP_DIR/$relative_path"
-            echo "  Backed up directory: $relative_path"
-        else
-            cp -P "$target_path" "$BACKUP_DIR/$relative_path"
-            echo "  Backed up file: $relative_path"
-        fi
-    fi
-done < <(find . -maxdepth 1 -mindepth 1 ! -path "./.git/*" ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -print0)
+mapfile -t items < <(find . -maxdepth 1 -mindepth 1 ! -name ".git" ! -name "install.sh" ! -name "README.md" ! -name "LICENSE" -printf "%P\n")
 
-# Now that everything is safely backed up, remove conflicts
-if [ ${#conflicts_to_remove[@]} -gt 0 ]; then
-    echo ""
-    echo "Removing conflicts to make way for symlinks..."
-    for conflict in "${conflicts_to_remove[@]}"; do
-        echo "  Removing: ${conflict#$HOME/}"
-        rm -rf "$conflict"
-    done
-fi
-
-if [ -d "$BACKUP_DIR" ]; then
-    echo ""
-    echo "✓ All conflicts backed up to: $BACKUP_DIR"
-fi
-
-echo ""
-echo "Setting up symlinks with stow..."
-if stow --restow --ignore="install.sh" --ignore="README.md" --ignore=".git" --ignore="LICENSE" --verbose=2 . 2>&1 | tee /tmp/stow_output.log; then
-    echo "✓ Symlinks created successfully"
-else
-    echo "✗ Error: Stow failed!"
-    echo ""
-    echo "Stow output:"
-    cat /tmp/stow_output.log
-    echo ""
-    
-    if [ -d "$BACKUP_DIR" ]; then
-        echo "RESTORING from backup: $BACKUP_DIR"
-        cp -r "$BACKUP_DIR"/. "$HOME/"
-        echo "✓ Backup restored"
-    fi
-    exit 1
-fi
-
-# Verify critical files were linked
-echo ""
-echo "Verifying symlinks..."
-critical_files=(".config/tmux/tmux.conf" ".config/nvim")
-all_good=true
-
-for file in "${critical_files[@]}"; do
-    if [ -e "$HOME/$file" ]; then
-        if [ -L "$HOME/$file" ]; then
-            echo "  ✓ ~/$file -> $(readlink "$HOME/$file")"
-        else
-            echo "  ⚠ ~/$file exists but is not a symlink"
-        fi
+for item in "${items[@]}"; do
+    if [ "$item" == ".config" ] && [ -d "$item" ]; then
+        # Only check things INSIDE .config so we don't nuked Hyprland
+        mapfile -t subitems < <(find ".config" -maxdepth 1 -mindepth 1 -printf "%P\n")
+        for subitem in "${subitems[@]}"; do
+            target="$HOME/.config/$subitem"
+            if [ -e "$target" ] || [ -L "$target" ]; then
+                [ -L "$target" ] && [[ "$(readlink "$target")" == *"$DOTS_DIR"* ]] && continue
+                mkdir -p "$(dirname "$BACKUP_DIR/.config/$subitem")"
+                cp -rP "$target" "$BACKUP_DIR/.config/$subitem"
+                rm -rf "$target"
+                echo "  Backup: ~/.config/$subitem"
+            fi
+        done
     else
-        echo "  ✗ ~/$file missing!"
-        all_good=false
+        # Handle top-level files like .bashrc
+        target="$HOME/$item"
+        if [ -e "$target" ] || [ -L "$target" ]; then
+            [ -L "$target" ] && [[ "$(readlink "$target")" == *"$DOTS_DIR"* ]] && continue
+            mkdir -p "$BACKUP_DIR"
+            cp -rP "$target" "$BACKUP_DIR/$item"
+            rm -rf "$target"
+            echo "  Backup: ~/$item"
+        fi
     fi
 done
 
-if [ "$all_good" = false ]; then
-    echo ""
-    echo "⚠ Warning: Some expected files are missing"
-    echo "Check your dots repo structure."
-fi
+# 6. Symlink
+echo "Stowing..."
+stow -v .
 
-# Apply tmux config if tmux is running
+# 7. Apply Tmux config
 if tmux info &>/dev/null 2>&1; then
-    echo ""
-    echo "Applying tmux config to running session..."
+    echo "Reloading tmux..."
     tmux source-file ~/.config/tmux/tmux.conf 2>/dev/null || true
 fi
 
-echo ""
 echo "========================"
 echo "✓ Setup complete!"
 [ -d "$BACKUP_DIR" ] && echo "✓ Backups: $BACKUP_DIR"
-echo "✓ Neovim installed"
-echo "✓ Reload tmux: prefix + I to install plugins"
+echo "✓ Hyprland was NOT touched."
 echo "========================"
