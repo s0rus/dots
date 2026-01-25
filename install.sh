@@ -59,7 +59,6 @@ mapfile -t items < <(find . -maxdepth 1 -mindepth 1 ! -name ".git" ! -name "inst
 
 for item in "${items[@]}"; do
     if [ "$item" == ".config" ] && [ -d "$item" ]; then
-        # Only check things INSIDE .config so we don't nuked Hyprland
         mapfile -t subitems < <(find ".config" -maxdepth 1 -mindepth 1 -printf "%P\n")
         for subitem in "${subitems[@]}"; do
             target="$HOME/.config/$subitem"
