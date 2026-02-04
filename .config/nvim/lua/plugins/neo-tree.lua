@@ -23,8 +23,9 @@ return {
       },
       filtered_items = {
         hide_by_name = { '.git', 'node_modules' },
-        hide_by_pattern = { '*.uid', '*.import' }
-      }
+        hide_by_pattern = { '*.uid', '*.import' },
+        always_show = { '.env', '.env.local', '.env.development', '.env.production' }
+      },
     },
   },
 }
